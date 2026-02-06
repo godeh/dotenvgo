@@ -32,6 +32,8 @@ type Config struct {
 	// Optional settings
 	MaxConnections int      `env:"MAX_CONNECTIONS" default:"100"`
 	AllowedOrigins []string `env:"ALLOWED_ORIGINS" default:"*"`
+
+	IDs []int `env:"IDS" default:"1,2,3,4,5"`
 }
 
 func main() {
@@ -41,6 +43,7 @@ func main() {
 	os.Setenv("DATABASE_URL", "postgres://user:pass@localhost/mydb")
 	os.Setenv("READ_TIMEOUT", "1m")
 	os.Setenv("ALLOWED_ORIGINS", "http://localhost:3000, https://myapp.com")
+	os.Setenv("IDS", "1, 2, 3")
 
 	// Load configuration
 	var cfg Config
@@ -61,4 +64,5 @@ func main() {
 	fmt.Printf("Database URL:    %s\n", cfg.DatabaseURL)
 	fmt.Printf("Max Connections: %d\n", cfg.MaxConnections)
 	fmt.Printf("Allowed Origins: %v\n", cfg.AllowedOrigins)
+	fmt.Printf("IDs:             %v\n", cfg.IDs)
 }

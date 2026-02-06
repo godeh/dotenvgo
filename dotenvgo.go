@@ -17,14 +17,19 @@ type Var[T any] struct {
 	prefix       string
 }
 
-// New creates a new environment variable of type T.
-// It searches for a registered parser or uses encoding.TextUnmarshaler.
+// New creates a new environment variable of type T using the default loader.
 func New[T any](key string) *Var[T] {
+	return NewVar[T](DefaultLoader, key)
+}
+
+// NewVar creates a new environment variable of type T using the specified Loader.
+// It searches for a registered parser or uses encoding.TextUnmarshaler.
+func NewVar[T any](l *Loader, key string) *Var[T] {
 	var zero T
 	typ := reflect.TypeOf(zero)
 
 	// 1. Check registry
-	if p, ok := getParser(typ); ok {
+	if p, ok := l.getParser(typ); ok {
 		return &Var[T]{
 			key: key,
 			parser: func(s string) (T, error) {
@@ -37,20 +42,13 @@ func New[T any](key string) *Var[T] {
 		}
 	}
 
-	// 2. Check TextUnmarshaler (not easily done without instance for Var.parser logic,
-	// but we can wrap it effectively inside the closure if we assume it implements it at runtime
-	// OR we can't easily check 'T' for interface implementation if T is concrete struct value type
-	// unless we use reflection inside parser)
-
+	// 2. Check TextUnmarshaler
 	// Better approach: Generic Parser Factory
 	return &Var[T]{
 		key: key,
 		parser: func(s string) (T, error) {
-			// Re-check generic logic at runtime per call, or optimize?
-			// Since we don't have the field reflect.Value here, we replicate setField logic but for T.
-
 			// Re-lookup registry (fast)
-			if p, ok := getParser(typ); ok {
+			if p, ok := l.getParser(typ); ok {
 				v, err := p(s)
 				if err != nil {
 					return zero, err
@@ -59,7 +57,6 @@ func New[T any](key string) *Var[T] {
 			}
 
 			// TextUnmarshaler
-			// Create pointer to new T
 			valPtr := reflect.New(typ)
 			if u, ok := valPtr.Interface().(encoding.TextUnmarshaler); ok {
 				if err := u.UnmarshalText([]byte(s)); err != nil {
@@ -171,18 +168,31 @@ func (v *Var[T]) IsSet() bool {
 }
 
 // LoadDotEnv loads environment variables from a .env file.
-// It does NOT override existing environment variables.
-func LoadDotEnv(path string) error {
-	return loadDotEnvWithOverride(path, false)
+// By default, it does NOT override existing environment variables.
+// Pass true as the second argument to override existing variables.
+//
+// Examples:
+//
+//	LoadDotEnv(".env")        // doesn't override existing vars
+//	LoadDotEnv(".env", false) // same as above
+//	LoadDotEnv(".env", true)  // overrides existing vars
+func LoadDotEnv(path string, override ...bool) error {
+	shouldOverride := false
+	if len(override) > 0 {
+		shouldOverride = override[0]
+	}
+	return loadDotEnvInternal(path, shouldOverride)
 }
 
 // LoadDotEnvOverride loads environment variables from a .env file.
 // It DOES override existing environment variables.
+//
+// Deprecated: Use LoadDotEnv(path, true) instead.
 func LoadDotEnvOverride(path string) error {
-	return loadDotEnvWithOverride(path, true)
+	return LoadDotEnv(path, true)
 }
 
-func loadDotEnvWithOverride(path string, override bool) error {
+func loadDotEnvInternal(path string, override bool) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -198,13 +208,13 @@ func loadDotEnvWithOverride(path string, override bool) error {
 		}
 
 		// Find the first '='
-		idx := strings.Index(line, "=")
-		if idx == -1 {
+		before, after, ok := strings.Cut(line, "=")
+		if !ok {
 			continue
 		}
 
-		key := strings.TrimSpace(line[:idx])
-		valPart := strings.TrimSpace(line[idx+1:])
+		key := strings.TrimSpace(before)
+		valPart := strings.TrimSpace(after)
 		var value string
 
 		if len(valPart) > 0 {
