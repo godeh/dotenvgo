@@ -9,59 +9,73 @@ import (
 	"time"
 )
 
-var (
-	registryMu sync.RWMutex
-	registry   = make(map[reflect.Type]func(string) (any, error))
-)
+// Loader manages the configuration loading and parser registry.
+type Loader struct {
+	mu       sync.RWMutex
+	registry map[reflect.Type]func(string) (any, error)
+}
 
-func init() {
+// DefaultLoader is the default loader instance used by global functions.
+var DefaultLoader = NewLoader()
+
+// NewLoader creates a new Loader with default parsers registered.
+func NewLoader() *Loader {
+	l := &Loader{
+		registry: make(map[reflect.Type]func(string) (any, error)),
+	}
+	l.registerDefaults()
+	return l
+}
+
+// registerDefaults registers the standard parsers.
+func (l *Loader) registerDefaults() {
 	// String
-	RegisterParser(func(s string) (string, error) { return s, nil })
+	l.RegisterParser(func(s string) (string, error) { return s, nil })
 
 	// Integers
-	RegisterParser(func(s string) (int, error) { return strconv.Atoi(s) })
-	RegisterParser(func(s string) (int8, error) {
+	l.RegisterParser(func(s string) (int, error) { return strconv.Atoi(s) })
+	l.RegisterParser(func(s string) (int8, error) {
 		v, err := strconv.ParseInt(s, 10, 8)
 		return int8(v), err
 	})
-	RegisterParser(func(s string) (int16, error) {
+	l.RegisterParser(func(s string) (int16, error) {
 		v, err := strconv.ParseInt(s, 10, 16)
 		return int16(v), err
 	})
-	RegisterParser(func(s string) (int32, error) {
+	l.RegisterParser(func(s string) (int32, error) {
 		v, err := strconv.ParseInt(s, 10, 32)
 		return int32(v), err
 	})
-	RegisterParser(func(s string) (int64, error) { return strconv.ParseInt(s, 10, 64) })
+	l.RegisterParser(func(s string) (int64, error) { return strconv.ParseInt(s, 10, 64) })
 
 	// Unsigned Integers
-	RegisterParser(func(s string) (uint, error) {
+	l.RegisterParser(func(s string) (uint, error) {
 		v, err := strconv.ParseUint(s, 10, 64)
 		return uint(v), err
 	})
-	RegisterParser(func(s string) (uint8, error) {
+	l.RegisterParser(func(s string) (uint8, error) {
 		v, err := strconv.ParseUint(s, 10, 8)
 		return uint8(v), err
 	})
-	RegisterParser(func(s string) (uint16, error) {
+	l.RegisterParser(func(s string) (uint16, error) {
 		v, err := strconv.ParseUint(s, 10, 16)
 		return uint16(v), err
 	})
-	RegisterParser(func(s string) (uint32, error) {
+	l.RegisterParser(func(s string) (uint32, error) {
 		v, err := strconv.ParseUint(s, 10, 32)
 		return uint32(v), err
 	})
-	RegisterParser(func(s string) (uint64, error) { return strconv.ParseUint(s, 10, 64) })
+	l.RegisterParser(func(s string) (uint64, error) { return strconv.ParseUint(s, 10, 64) })
 
 	// Floats
-	RegisterParser(func(s string) (float32, error) {
+	l.RegisterParser(func(s string) (float32, error) {
 		v, err := strconv.ParseFloat(s, 64)
 		return float32(v), err
 	})
-	RegisterParser(func(s string) (float64, error) { return strconv.ParseFloat(s, 64) })
+	l.RegisterParser(func(s string) (float64, error) { return strconv.ParseFloat(s, 64) })
 
 	// Bool
-	RegisterParser(func(s string) (bool, error) {
+	l.RegisterParser(func(s string) (bool, error) {
 		switch strings.ToLower(s) {
 		case "true", "1", "yes", "on", "y":
 			return true, nil
@@ -73,13 +87,18 @@ func init() {
 	})
 
 	// Time Duration
-	RegisterParser(time.ParseDuration)
+	l.RegisterParser(time.ParseDuration)
 
 	// Time Location
-	RegisterParser(time.LoadLocation)
+	l.RegisterParser(time.LoadLocation)
 
-	// String Slice
-	RegisterParser(func(s string) ([]string, error) {
+	// NOTE: Slice types ([]int, []bool, etc.) are automatically supported!
+	// When you register a parser for type T, []T is automatically handled
+	// by getParser() which generates a slice parser dynamically.
+	// The only exception is []string which we register explicitly for efficiency.
+
+	// String Slice (explicit for efficiency, avoiding reflection overhead)
+	l.RegisterParser(func(s string) ([]string, error) {
 		if s == "" {
 			return []string{}, nil
 		}
@@ -97,22 +116,90 @@ func init() {
 // RegisterParser registers a custom parser for a specific type T.
 // This parser will be used when loading structs with fields of type T.
 func RegisterParser[T any](parser func(string) (T, error)) {
-	registryMu.Lock()
-	defer registryMu.Unlock()
+	DefaultLoader.RegisterParser(parser)
+}
 
-	var zero T
-	t := reflect.TypeOf(zero)
+// RegisterParser registers a custom parser for a specific type T on this Loader instance.
+func (l *Loader) RegisterParser(parser any) {
+	// We use reflection to get the function type and the return type T
+	v := reflect.ValueOf(parser)
+	if v.Kind() != reflect.Func {
+		panic("parser must be a function")
+	}
+	t := v.Type()
+	if t.NumIn() != 1 || t.In(0).Kind() != reflect.String {
+		panic("parser must take a single string argument")
+	}
+	if t.NumOut() != 2 || t.Out(1).Name() != "error" {
+		panic("parser must return (T, error)")
+	}
 
-	registry[t] = func(s string) (any, error) {
-		return parser(s)
+	targetType := t.Out(0)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.registry[targetType] = func(s string) (any, error) {
+		res := v.Call([]reflect.Value{reflect.ValueOf(s)})
+		errVal := res[1].Interface()
+		if errVal != nil {
+			return nil, errVal.(error)
+		}
+		return res[0].Interface(), nil
 	}
 }
 
-// getParser returns a registered parser for the given type, if one exists.
-func getParser(t reflect.Type) (func(string) (any, error), bool) {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
+// WithLoader creates a new environment variable of type T using the specified Loader.
+// This provides a more fluent API for creating variables with isolated loaders.
+//
+// Example:
+//
+//	loader := dotenvgo.NewLoader()
+//	loader.RegisterParser(func(s string) (MyType, error) { ... })
+//	value := dotenvgo.WithLoader[MyType](loader, "MY_VAR").Get()
+func WithLoader[T any](l *Loader, key string) *Var[T] {
+	return NewVar[T](l, key)
+}
 
-	parser, ok := registry[t]
-	return parser, ok
+// getParser returns a registered parser for the given type, if one exists.
+// If the type is a slice and no direct parser exists, it will automatically
+// generate a slice parser if a parser for the element type is registered.
+func (l *Loader) getParser(t reflect.Type) (func(string) (any, error), bool) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	// 1. Check for direct parser
+	if parser, ok := l.registry[t]; ok {
+		return parser, true
+	}
+
+	// 2. If it's a slice, try to generate parser from element type
+	if t.Kind() == reflect.Slice {
+		elemType := t.Elem()
+		if elemParser, ok := l.registry[elemType]; ok {
+			// Generate slice parser dynamically
+			sliceParser := func(s string) (any, error) {
+				if s == "" {
+					return reflect.MakeSlice(t, 0, 0).Interface(), nil
+				}
+				parts := strings.Split(s, ",")
+				slice := reflect.MakeSlice(t, 0, len(parts))
+				for _, p := range parts {
+					trimmed := strings.TrimSpace(p)
+					if trimmed == "" {
+						continue
+					}
+					val, err := elemParser(trimmed)
+					if err != nil {
+						return nil, err
+					}
+					slice = reflect.Append(slice, reflect.ValueOf(val))
+				}
+				return slice.Interface(), nil
+			}
+			return sliceParser, true
+		}
+	}
+
+	return nil, false
 }

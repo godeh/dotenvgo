@@ -24,12 +24,22 @@ import (
 //	    Timeout  time.Duration `env:"TIMEOUT" default:"30s"`
 //	}
 func Load(cfg any) error {
-	return LoadWithPrefix(cfg, "")
+	return DefaultLoader.LoadWithPrefix(cfg, "")
 }
 
 // LoadWithPrefix populates a struct with a prefix for all env vars.
 // For example, LoadWithPrefix(cfg, "APP") will look for APP_PORT instead of PORT.
 func LoadWithPrefix(cfg any, prefix string) error {
+	return DefaultLoader.LoadWithPrefix(cfg, prefix)
+}
+
+// Load populates a struct from environment variables using struct tags.
+func (l *Loader) Load(cfg any) error {
+	return l.LoadWithPrefix(cfg, "")
+}
+
+// LoadWithPrefix populates a struct with a prefix for all env vars.
+func (l *Loader) LoadWithPrefix(cfg any, prefix string) error {
 	v := reflect.ValueOf(cfg)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return fmt.Errorf("dotenvgo: cfg must be a non-nil pointer to a struct")
@@ -40,7 +50,7 @@ func LoadWithPrefix(cfg any, prefix string) error {
 		return fmt.Errorf("dotenvgo: cfg must be a pointer to a struct")
 	}
 
-	return loadStruct(v, prefix)
+	return l.loadStruct(v, prefix)
 }
 
 // MustLoad is like Load but panics on error.
@@ -57,7 +67,7 @@ func MustLoadWithPrefix(cfg any, prefix string) {
 	}
 }
 
-func loadStruct(v reflect.Value, prefix string) error {
+func (l *Loader) loadStruct(v reflect.Value, prefix string) error {
 	t := v.Type()
 	var errors []error
 
@@ -73,13 +83,13 @@ func loadStruct(v reflect.Value, prefix string) error {
 		// Handle structs (embedded or named) that don't have a parser/unmarshaler
 		if field.Type.Kind() == reflect.Struct {
 			// Check if it's a "leaf" type (has parser or implements TextUnmarshaler)
-			_, hasParser := getParser(field.Type)
+			_, hasParser := l.getParser(field.Type)
 			isUnmarshaler := field.Type.Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) ||
 				reflect.PointerTo(field.Type).Implements(reflect.TypeFor[encoding.TextUnmarshaler]())
 
 			if !hasParser && !isUnmarshaler {
 				// Recurse
-				if err := loadStruct(fieldValue, prefix); err != nil {
+				if err := l.loadStruct(fieldValue, prefix); err != nil {
 					errors = append(errors, err)
 				}
 				continue
@@ -116,7 +126,7 @@ func loadStruct(v reflect.Value, prefix string) error {
 		}
 
 		// Parse and set value
-		if err := setField(fieldValue, field.Tag, value); err != nil {
+		if err := l.setField(fieldValue, field.Tag, value); err != nil {
 			errors = append(errors, &ParseError{Key: fullKey, Value: value, Err: err})
 		}
 	}
@@ -127,7 +137,7 @@ func loadStruct(v reflect.Value, prefix string) error {
 	return nil
 }
 
-func setField(field reflect.Value, tag reflect.StructTag, value string) error {
+func (l *Loader) setField(field reflect.Value, tag reflect.StructTag, value string) error {
 	// 0. Handle custom separator for slices
 	if field.Kind() == reflect.Slice {
 		sep := tag.Get("sep")
@@ -137,7 +147,7 @@ func setField(field reflect.Value, tag reflect.StructTag, value string) error {
 			elemType := field.Type().Elem()
 
 			// Find parser for element type
-			parser, ok := getParser(elemType)
+			parser, ok := l.getParser(elemType)
 			if !ok {
 				// Fallback to TextUnmarshaler for element?
 				// For now error if no parser for element
@@ -161,7 +171,7 @@ func setField(field reflect.Value, tag reflect.StructTag, value string) error {
 	}
 
 	// 1. Check if type has a registered parser
-	if parser, ok := getParser(field.Type()); ok {
+	if parser, ok := l.getParser(field.Type()); ok {
 		parsed, err := parser(value)
 		if err != nil {
 			return err

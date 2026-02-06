@@ -1,6 +1,9 @@
 package dotenvgo
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // RequiredError is returned when a required environment variable is not set.
 type RequiredError struct {
@@ -46,7 +49,14 @@ func (e *MultiError) Error() string {
 	if len(e.Errors) == 1 {
 		return e.Errors[0].Error()
 	}
-	return fmt.Sprintf("dotenvgo: %d errors occurred", len(e.Errors))
+
+	// Build detailed error message listing all errors
+	var msg strings.Builder
+	fmt.Fprintf(&msg, "dotenvgo: %d errors occurred:\n", len(e.Errors))
+	for i, err := range e.Errors {
+		fmt.Fprintf(&msg, "  [%d] %s\n", i+1, err.Error())
+	}
+	return msg.String()
 }
 
 // Unwrap returns the list of errors.

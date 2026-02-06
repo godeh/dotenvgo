@@ -2,6 +2,7 @@ package dotenvgo
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -44,11 +45,19 @@ func TestErrors(t *testing.T) {
 			t.Error("Unwrap returned wrong number of errors")
 		}
 
-		if err.Error() != "dotenvgo: 2 errors occurred" {
-			t.Errorf("Unexpected error message: %s", err.Error())
+		// New format: lists all errors
+		errMsg := err.Error()
+		if !strings.Contains(errMsg, "2 errors occurred") {
+			t.Errorf("Expected '2 errors occurred' in message: %s", errMsg)
+		}
+		if !strings.Contains(errMsg, "[1] error 1") {
+			t.Errorf("Expected '[1] error 1' in message: %s", errMsg)
+		}
+		if !strings.Contains(errMsg, "[2] error 2") {
+			t.Errorf("Expected '[2] error 2' in message: %s", errMsg)
 		}
 
-		// Single error
+		// Single error - returns the error directly
 		err = &MultiError{Errors: []error{e1}}
 		if err.Error() != "error 1" {
 			t.Errorf("Unexpected single error message: %s", err.Error())
