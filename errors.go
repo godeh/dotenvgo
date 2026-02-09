@@ -30,16 +30,6 @@ func (e *ParseError) Unwrap() error {
 	return e.Err
 }
 
-// ValidationError is returned when struct validation fails.
-type ValidationError struct {
-	Field   string
-	Message string
-}
-
-func (e *ValidationError) Error() string {
-	return fmt.Sprintf("dotenvgo: validation failed for field %q: %s", e.Field, e.Message)
-}
-
 // MultiError contains multiple errors from struct loading.
 type MultiError struct {
 	Errors []error
