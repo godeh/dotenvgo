@@ -9,6 +9,10 @@ import (
 	"github.com/godeh/dotenvgo"
 )
 
+type Database struct {
+	URL string `env:"URL" default:"postgres://localhost:5432/defaultdb"`
+}
+
 // Config defines your application configuration
 type Config struct {
 	// Server settings
@@ -34,6 +38,8 @@ type Config struct {
 	AllowedOrigins []string `env:"ALLOWED_ORIGINS" default:"*"`
 
 	IDs []int `env:"IDS" default:"1,2,3,4,5"`
+
+	DB Database
 }
 
 func main() {
@@ -44,6 +50,7 @@ func main() {
 	os.Setenv("READ_TIMEOUT", "1m")
 	os.Setenv("ALLOWED_ORIGINS", "http://localhost:3000, https://myapp.com")
 	os.Setenv("IDS", "1, 2, 3")
+	os.Setenv("URL", "postgres://localhost:5432/prod")
 
 	// Load configuration
 	var cfg Config
@@ -65,4 +72,5 @@ func main() {
 	fmt.Printf("Max Connections: %d\n", cfg.MaxConnections)
 	fmt.Printf("Allowed Origins: %v\n", cfg.AllowedOrigins)
 	fmt.Printf("IDs:             %v\n", cfg.IDs)
+	fmt.Printf("DB URL:          %s\n", cfg.DB.URL)
 }

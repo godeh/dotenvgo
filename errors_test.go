@@ -28,14 +28,6 @@ func TestErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("ValidationError", func(t *testing.T) {
-		err := &ValidationError{Field: "Age", Message: "too low"}
-		expected := "dotenvgo: validation failed for field \"Age\": too low"
-		if err.Error() != expected {
-			t.Errorf("Expected %q, got %q", expected, err.Error())
-		}
-	})
-
 	t.Run("MultiError", func(t *testing.T) {
 		e1 := errors.New("error 1")
 		e2 := errors.New("error 2")

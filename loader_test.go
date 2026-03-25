@@ -51,6 +51,9 @@ func TestLoad(t *testing.T) {
 		if cfg.Timeout != 30*time.Second {
 			t.Errorf("Expected Timeout 30s, got %v", cfg.Timeout)
 		}
+		if cfg.secret != "" {
+			t.Errorf("Expected unexported field to remain unset, got %q", cfg.secret)
+		}
 	})
 
 	t.Run("Env Overrides", func(t *testing.T) {
