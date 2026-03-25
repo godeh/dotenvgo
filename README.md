@@ -172,6 +172,10 @@ colorB := dotenvgo.WithLoader[Color](loaderB, "THEME").Get() // Red
 | `bool` | `true`, `false`, `1`, `0`, `yes`, `no`, `on`, `off` |
 | `time.Duration` | `30s`, `1h30m`, `500ms` |
 | `*time.Location` | `America/New_York`, `UTC` |
+| `*string`, `*int`, `*uint`, `*float64`, `*bool`, `*time.Duration` | same values as their non-pointer equivalents |
+| `*[]string`, `*[]int`, `*[]uint`, `*[]float64`, `*[]bool` | comma-separated values, or custom separators with `sep` |
+| `[]*string`, `[]*int`, `[]*uint`, `[]*float64`, `[]*bool` | comma-separated values, each item loaded as a pointer |
+| `*Struct` | nested config loaded from prefixed child fields such as `DB_URL` |
 | `[]string` | `a,b,c` |
 | `[]int`, `[]int8-64` | `1,2,3` |
 | `[]uint`, `[]uint8-64` | `1,2,3` |
@@ -187,6 +191,8 @@ colorB := dotenvgo.WithLoader[Color](loaderB, "THEME").Get() // Red
 | `default` | Default value | `default:"8080"` |
 | `required` | Fail if missing | `required:"true"` |
 | `sep` | Slice separator | `sep:";"` |
+
+Pointer fields are supported during struct loading. For scalar pointer fields such as `*string` or `*int`, the loader allocates the pointer when a value or default exists. Pointer-to-slice fields such as `*[]string` work the same way. Slice-of-pointer fields such as `[]*string` and `[]*int` are also supported for leaf types. For nested pointer structs such as `*Database`, the loader allocates the struct when at least one nested field is loaded, for example from `DB_URL` or nested defaults.
 
 ## `.env` File Format
 
@@ -239,6 +245,7 @@ See [examples/](./examples) for complete working code:
 | [struct](./examples/struct) | Struct-based config |
 | [nested_prefix](./examples/nested_prefix) | Nested structs with env tag prefixes |
 | [empty_values](./examples/empty_values) | Missing vs empty value semantics |
+| [pointer_slices](./examples/pointer_slices) | Pointer to slice and slice of pointers |
 | [file](./examples/file) | Loading `.env` files |
 | [expansion](./examples/expansion) | Variable expansion |
 | [isolated_loader](./examples/isolated_loader) | Isolated loader demo |

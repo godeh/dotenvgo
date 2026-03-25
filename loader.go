@@ -235,29 +235,13 @@ func (l *Loader) setField(field reflect.Value, tag reflect.StructTag, value stri
 	// 0. Handle custom separator for slices
 	if field.Kind() == reflect.Slice {
 		sep := tag.Get("sep")
-		if sep != "" {
-			parts := strings.Split(value, sep)
-			slice := reflect.MakeSlice(field.Type(), 0, len(parts))
-			elemType := field.Type().Elem()
-
-			// Find parser for element type
-			parser, ok := l.getParser(elemType)
-			if !ok {
-				// Fallback to TextUnmarshaler for element?
-				// For now error if no parser for element
-				return fmt.Errorf("dotenvgo: no parser registered for slice element type %v", elemType)
+		if sep != "" || field.Type().Elem().Kind() == reflect.Pointer {
+			if sep == "" {
+				sep = ","
 			}
-
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p == "" {
-					continue
-				}
-				parsed, err := parser(p)
-				if err != nil {
-					return err
-				}
-				slice = reflect.Append(slice, reflect.ValueOf(parsed))
+			slice, err := l.parseSlice(field.Type(), tag, value, sep)
+			if err != nil {
+				return err
 			}
 			field.Set(slice)
 			return nil
@@ -286,4 +270,25 @@ func (l *Loader) setField(field reflect.Value, tag reflect.StructTag, value stri
 	}
 
 	return fmt.Errorf("dotenvgo: no parser registered for type %v", field.Type())
+}
+
+func (l *Loader) parseSlice(sliceType reflect.Type, tag reflect.StructTag, value, sep string) (reflect.Value, error) {
+	parts := strings.Split(value, sep)
+	slice := reflect.MakeSlice(sliceType, 0, len(parts))
+	elemType := sliceType.Elem()
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		elem := reflect.New(elemType).Elem()
+		if err := l.setField(elem, tag, part); err != nil {
+			return reflect.Value{}, fmt.Errorf("dotenvgo: no parser registered for slice element type %v: %w", elemType, err)
+		}
+		slice = reflect.Append(slice, elem)
+	}
+
+	return slice, nil
 }
