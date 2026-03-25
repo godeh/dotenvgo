@@ -146,6 +146,26 @@ func TestPointerDefaults(t *testing.T) {
 	}
 }
 
+func TestPointerLeafTypes(t *testing.T) {
+	type PointerConfig struct {
+		Location *time.Location `env:"LOCATION"`
+	}
+
+	setEnv(t, "LOCATION", "UTC")
+
+	var cfg PointerConfig
+	if err := Load(&cfg); err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Location == nil {
+		t.Fatal("Expected Location to be set")
+	}
+	if cfg.Location.String() != "UTC" {
+		t.Errorf("Expected Location UTC, got %q", cfg.Location.String())
+	}
+}
+
 func TestLoadWithPrefix(t *testing.T) {
 	setEnv(t, "APP_REQUIRED_VAR", "req")
 	setEnv(t, "APP_HOST", "app-host")
@@ -305,6 +325,77 @@ func TestNestedStructs(t *testing.T) {
 		}
 		if app.DB.URL != "postgres://localhost:5432/global-prefixed" {
 			t.Errorf("Expected DB.URL 'postgres://localhost:5432/global-prefixed', got %q", app.DB.URL)
+		}
+	})
+}
+
+func TestNestedStructPointers(t *testing.T) {
+	type Database struct {
+		URL string `env:"URL" default:"localhost"`
+	}
+
+	type OptionalDatabase struct {
+		URL string `env:"URL"`
+	}
+
+	type Config struct {
+		DB *Database `env:"DB"`
+	}
+
+	t.Run("Nil When No Nested Values Or Defaults Exist", func(t *testing.T) {
+		type OptionalConfig struct {
+			DB *OptionalDatabase `env:"DB"`
+		}
+
+		var cfg OptionalConfig
+		if err := Load(&cfg); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if cfg.DB != nil {
+			t.Fatalf("Expected DB to remain nil, got %#v", cfg.DB)
+		}
+	})
+
+	t.Run("Allocates Pointer When Nested Default Exists", func(t *testing.T) {
+		var cfg Config
+		if err := Load(&cfg); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if cfg.DB == nil {
+			t.Fatal("Expected DB pointer to be allocated from nested default")
+		}
+		if cfg.DB.URL != "localhost" {
+			t.Errorf("Expected DB.URL 'localhost', got %q", cfg.DB.URL)
+		}
+	})
+
+	t.Run("Allocates Pointer When Nested Value Exists", func(t *testing.T) {
+		setEnv(t, "DB_URL", "postgres://localhost:5432/pointer")
+
+		var cfg Config
+		if err := Load(&cfg); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if cfg.DB == nil {
+			t.Fatal("Expected DB pointer to be allocated")
+		}
+		if cfg.DB.URL != "postgres://localhost:5432/pointer" {
+			t.Errorf("Expected DB.URL 'postgres://localhost:5432/pointer', got %q", cfg.DB.URL)
+		}
+	})
+
+	t.Run("Allocates Pointer With Global Prefix", func(t *testing.T) {
+		setEnv(t, "APP_DB_URL", "postgres://localhost:5432/pointer-prefixed")
+
+		var cfg Config
+		if err := LoadWithPrefix(&cfg, "APP"); err != nil {
+			t.Fatalf("LoadWithPrefix failed: %v", err)
+		}
+		if cfg.DB == nil {
+			t.Fatal("Expected DB pointer to be allocated")
+		}
+		if cfg.DB.URL != "postgres://localhost:5432/pointer-prefixed" {
+			t.Errorf("Expected DB.URL 'postgres://localhost:5432/pointer-prefixed', got %q", cfg.DB.URL)
 		}
 	})
 }
