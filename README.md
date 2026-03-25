@@ -82,6 +82,33 @@ dotenvgo.LoadDotEnv(".env", true)  // Override existing vars
 dotenvgo.MustLoadDotEnv(".env")    // Panic on error
 ```
 
+### Missing Vs Empty Values
+
+`dotenvgo` distinguishes between a variable that is missing and a variable that is explicitly set to an empty string.
+
+```go
+os.Unsetenv("DATABASE_URL")
+dbURL := dotenvgo.New[string]("DATABASE_URL").Default("postgres://localhost").Get()
+// dbURL == "postgres://localhost"
+
+os.Setenv("DATABASE_URL", "")
+dbURL = dotenvgo.New[string]("DATABASE_URL").Default("postgres://localhost").Get()
+// dbURL == ""
+
+type Config struct {
+    DSN *string `env:"DATABASE_URL"`
+}
+
+var cfg Config
+dotenvgo.Load(&cfg)
+// cfg.DSN points to ""
+```
+
+This also affects `required` and `.env` loading:
+
+- `required:"true"` only fails when the variable is missing.
+- `LoadDotEnv(path)` will not overwrite an existing variable, even if its value is empty.
+
 ### Custom Parsers
 
 ```go
@@ -211,6 +238,7 @@ See [examples/](./examples) for complete working code:
 | [basic](./examples/basic) | Simple variable access |
 | [struct](./examples/struct) | Struct-based config |
 | [nested_prefix](./examples/nested_prefix) | Nested structs with env tag prefixes |
+| [empty_values](./examples/empty_values) | Missing vs empty value semantics |
 | [file](./examples/file) | Loading `.env` files |
 | [expansion](./examples/expansion) | Variable expansion |
 | [isolated_loader](./examples/isolated_loader) | Isolated loader demo |

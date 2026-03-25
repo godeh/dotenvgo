@@ -13,13 +13,15 @@ type TestConfig struct {
 	Debug    bool          `env:"DEBUG" default:"false"`
 	Timeout  time.Duration `env:"TIMEOUT" default:"30s"`
 	Required string        `env:"REQUIRED_VAR" required:"true"`
+	Alias    string        `env:"ALIAS" default:"fallback"`
 
 	// Slices
 	Hosts []string `env:"ALLOWED_HOSTS"`
 	IDs   []int    `env:"ALLOWED_IDS" sep:";"`
 
 	// Pointers
-	Optional *int `env:"OPTIONAL_INT"`
+	Optional   *int    `env:"OPTIONAL_INT"`
+	OptionalDSN *string `env:"OPTIONAL_DSN"`
 
 	// Unexported should be ignored
 	secret string `env:"SECRET"`
@@ -48,16 +50,22 @@ func TestLoad(t *testing.T) {
 		if cfg.Debug != false {
 			t.Errorf("Expected Debug false, got %v", cfg.Debug)
 		}
-		if cfg.Timeout != 30*time.Second {
-			t.Errorf("Expected Timeout 30s, got %v", cfg.Timeout)
-		}
-		if cfg.Optional != nil {
-			t.Errorf("Expected Optional to be nil, got %v", *cfg.Optional)
-		}
-		if cfg.secret != "" {
-			t.Errorf("Expected unexported field to remain unset, got %q", cfg.secret)
-		}
-	})
+			if cfg.Timeout != 30*time.Second {
+				t.Errorf("Expected Timeout 30s, got %v", cfg.Timeout)
+			}
+			if cfg.Alias != "fallback" {
+				t.Errorf("Expected Alias 'fallback', got %q", cfg.Alias)
+			}
+			if cfg.Optional != nil {
+				t.Errorf("Expected Optional to be nil, got %v", *cfg.Optional)
+			}
+			if cfg.OptionalDSN != nil {
+				t.Errorf("Expected OptionalDSN to be nil, got %q", *cfg.OptionalDSN)
+			}
+			if cfg.secret != "" {
+				t.Errorf("Expected unexported field to remain unset, got %q", cfg.secret)
+			}
+		})
 
 	t.Run("Env Overrides", func(t *testing.T) {
 		setEnv(t, "HOST", "127.0.0.1")
@@ -80,8 +88,29 @@ func TestLoad(t *testing.T) {
 		if cfg.Debug != true {
 			t.Errorf("Expected Debug true, got %v", cfg.Debug)
 		}
-		if cfg.Timeout != 1*time.Minute {
-			t.Errorf("Expected Timeout 1m, got %v", cfg.Timeout)
+			if cfg.Timeout != 1*time.Minute {
+				t.Errorf("Expected Timeout 1m, got %v", cfg.Timeout)
+			}
+		})
+
+	t.Run("Empty Strings Are Loaded", func(t *testing.T) {
+		setEnv(t, "ALIAS", "")
+		setEnv(t, "OPTIONAL_DSN", "")
+
+		var cfg TestConfig
+		err := Load(&cfg)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if cfg.Alias != "" {
+			t.Errorf("Expected Alias to be empty string, got %q", cfg.Alias)
+		}
+		if cfg.OptionalDSN == nil {
+			t.Fatal("Expected OptionalDSN to be set")
+		}
+		if *cfg.OptionalDSN != "" {
+			t.Errorf("Expected OptionalDSN to be empty string, got %q", *cfg.OptionalDSN)
 		}
 	})
 
@@ -202,15 +231,28 @@ func TestLoadErrors(t *testing.T) {
 
 	t.Run("Missing Required", func(t *testing.T) {
 		os.Unsetenv("REQUIRED_VAR")
-		var cfg TestConfig
-		err := Load(&cfg)
-		if err == nil {
-			t.Error("Expected error for missing required var")
-		}
+			var cfg TestConfig
+			err := Load(&cfg)
+			if err == nil {
+				t.Error("Expected error for missing required var")
+			}
 
 		var multiErr *MultiError
 		if !errors.As(err, &multiErr) {
 			t.Errorf("Expected MultiError, got %T", err)
+		}
+		})
+
+	t.Run("Required Empty String Does Not Error", func(t *testing.T) {
+		setEnv(t, "REQUIRED_VAR", "")
+
+		var cfg TestConfig
+		err := Load(&cfg)
+		if err != nil {
+			t.Fatalf("Expected empty required string to load, got %v", err)
+		}
+		if cfg.Required != "" {
+			t.Errorf("Expected Required to be empty string, got %q", cfg.Required)
 		}
 	})
 

@@ -138,8 +138,9 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) (bool, error) {
 		fullKey := joinEnvKey(prefix, envKey)
 
 		// Get value from environment
-		value := os.ExpandEnv(os.Getenv(fullKey))
-		if value == "" {
+		rawValue, exists := os.LookupEnv(fullKey)
+		value := os.ExpandEnv(rawValue)
+		if !exists {
 			if required {
 				errors = append(errors, &RequiredError{Key: fullKey})
 				continue
@@ -147,7 +148,7 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) (bool, error) {
 			value = os.ExpandEnv(defaultValue)
 		}
 
-		if value == "" {
+		if !exists && value == "" {
 			continue
 		}
 
