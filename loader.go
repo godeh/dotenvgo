@@ -74,6 +74,7 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) error {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		fieldValue := v.Field(i)
+		envKey := field.Tag.Get("env")
 
 		// Skip unexported fields
 		if !fieldValue.CanSet() {
@@ -88,8 +89,13 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) error {
 				reflect.PointerTo(field.Type).Implements(reflect.TypeFor[encoding.TextUnmarshaler]())
 
 			if !hasParser && !isUnmarshaler {
+				nestedPrefix := prefix
+				if envKey != "" {
+					nestedPrefix = joinEnvKey(prefix, envKey)
+				}
+
 				// Recurse
-				if err := l.loadStruct(fieldValue, prefix); err != nil {
+				if err := l.loadStruct(fieldValue, nestedPrefix); err != nil {
 					errors = append(errors, err)
 				}
 				continue
@@ -97,7 +103,6 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) error {
 		}
 
 		// Get struct tags
-		envKey := field.Tag.Get("env")
 		if envKey == "" {
 			continue
 		}
@@ -106,10 +111,7 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) error {
 		required := field.Tag.Get("required") == "true"
 
 		// Build full key with prefix
-		fullKey := envKey
-		if prefix != "" {
-			fullKey = prefix + "_" + envKey
-		}
+		fullKey := joinEnvKey(prefix, envKey)
 
 		// Get value from environment
 		value := os.ExpandEnv(os.Getenv(fullKey))
@@ -135,6 +137,13 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) error {
 		return &MultiError{Errors: errors}
 	}
 	return nil
+}
+
+func joinEnvKey(prefix, key string) string {
+	if prefix == "" {
+		return key
+	}
+	return prefix + "_" + key
 }
 
 func (l *Loader) setField(field reflect.Value, tag reflect.StructTag, value string) error {

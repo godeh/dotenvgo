@@ -56,6 +56,22 @@ dotenvgo.Load(&cfg)
 
 // Or with prefix (APP_HOST, APP_PORT, etc.)
 dotenvgo.LoadWithPrefix(&cfg, "APP")
+
+type DatabaseConfig struct {
+    URL string `env:"URL"`
+}
+
+type AppConfig struct {
+    DB DatabaseConfig `env:"DB"`
+}
+
+var appCfg AppConfig
+
+// Reads DB_URL
+dotenvgo.Load(&appCfg)
+
+// Reads APP_DB_URL
+dotenvgo.LoadWithPrefix(&appCfg, "APP")
 ```
 
 ### Load `.env` Files
@@ -140,7 +156,7 @@ colorB := dotenvgo.WithLoader[Color](loaderB, "THEME").Get() // Red
 
 | Tag | Description | Example |
 |-----|-------------|---------|
-| `env` | Variable name | `env:"PORT"` |
+| `env` | Variable name, or nested struct prefix when used on a struct field | `env:"PORT"` / `env:"DB"` |
 | `default` | Default value | `default:"8080"` |
 | `required` | Fail if missing | `required:"true"` |
 | `sep` | Slice separator | `sep:";"` |
@@ -194,6 +210,7 @@ See [examples/](./examples) for complete working code:
 |---------|-------------|
 | [basic](./examples/basic) | Simple variable access |
 | [struct](./examples/struct) | Struct-based config |
+| [nested_prefix](./examples/nested_prefix) | Nested structs with env tag prefixes |
 | [file](./examples/file) | Loading `.env` files |
 | [expansion](./examples/expansion) | Variable expansion |
 | [isolated_loader](./examples/isolated_loader) | Isolated loader demo |

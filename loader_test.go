@@ -202,25 +202,66 @@ func TestNestedStructs(t *testing.T) {
 		URL string `env:"URL" default:"localhost"`
 	}
 
-	type App struct {
+	type AppWithoutPrefix struct {
 		Name string `env:"NAME"`
 		DB   Database
 	}
 
-	setEnv(t, "NAME", "MyApp")
-	setEnv(t, "URL", "postgres://localhost:5432")
-
-	var app App
-	if err := Load(&app); err != nil {
-		t.Fatalf("Load failed: %v", err)
+	type AppWithPrefix struct {
+		Name string   `env:"NAME"`
+		DB   Database `env:"DB"`
 	}
 
-	if app.Name != "MyApp" {
-		t.Errorf("Expected Name 'MyApp', got %q", app.Name)
-	}
-	if app.DB.URL != "postgres://localhost:5432" {
-		t.Errorf("Expected DB.URL 'postgres://localhost:5432', got %q", app.DB.URL)
-	}
+	t.Run("Without Struct Prefix Tag", func(t *testing.T) {
+		setEnv(t, "NAME", "MyApp")
+		setEnv(t, "URL", "postgres://localhost:5432")
+
+		var app AppWithoutPrefix
+		if err := Load(&app); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if app.Name != "MyApp" {
+			t.Errorf("Expected Name 'MyApp', got %q", app.Name)
+		}
+		if app.DB.URL != "postgres://localhost:5432" {
+			t.Errorf("Expected DB.URL 'postgres://localhost:5432', got %q", app.DB.URL)
+		}
+	})
+
+	t.Run("With Struct Prefix Tag", func(t *testing.T) {
+		setEnv(t, "NAME", "MyApp")
+		setEnv(t, "DB_URL", "postgres://localhost:5432/prefixed")
+
+		var app AppWithPrefix
+		if err := Load(&app); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if app.Name != "MyApp" {
+			t.Errorf("Expected Name 'MyApp', got %q", app.Name)
+		}
+		if app.DB.URL != "postgres://localhost:5432/prefixed" {
+			t.Errorf("Expected DB.URL 'postgres://localhost:5432/prefixed', got %q", app.DB.URL)
+		}
+	})
+
+	t.Run("With Global Prefix And Struct Prefix Tag", func(t *testing.T) {
+		setEnv(t, "APP_NAME", "MyApp")
+		setEnv(t, "APP_DB_URL", "postgres://localhost:5432/global-prefixed")
+
+		var app AppWithPrefix
+		if err := LoadWithPrefix(&app, "APP"); err != nil {
+			t.Fatalf("LoadWithPrefix failed: %v", err)
+		}
+
+		if app.Name != "MyApp" {
+			t.Errorf("Expected Name 'MyApp', got %q", app.Name)
+		}
+		if app.DB.URL != "postgres://localhost:5432/global-prefixed" {
+			t.Errorf("Expected DB.URL 'postgres://localhost:5432/global-prefixed', got %q", app.DB.URL)
+		}
+	})
 }
 
 // Custom type implementing TextUnmarshaler
