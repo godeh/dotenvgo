@@ -3,6 +3,7 @@ package dotenvgo
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -336,9 +337,9 @@ func TestLoadErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("Parse Error", func(t *testing.T) {
-		setEnv(t, "REQUIRED_VAR", "ok")
-		setEnv(t, "PORT", "invalid-int")
+		t.Run("Parse Error", func(t *testing.T) {
+			setEnv(t, "REQUIRED_VAR", "ok")
+			setEnv(t, "PORT", "invalid-int")
 
 		var cfg TestConfig
 		err := Load(&cfg)
@@ -352,8 +353,70 @@ func TestLoadErrors(t *testing.T) {
 		}
 
 		var parseErr *ParseError
+			if !errors.As(multiErr.Errors[0], &parseErr) {
+				t.Errorf("Expected ParseError, got %T", multiErr.Errors[0])
+			}
+		})
+
+	t.Run("Nested Errors Are Flattened", func(t *testing.T) {
+		type Database struct {
+			URL      string `env:"URL" required:"true"`
+			User     string `env:"USER" required:"true"`
+		}
+
+		type Config struct {
+			DB Database `env:"DB"`
+		}
+
+		var cfg Config
+		err := Load(&cfg)
+		if err == nil {
+			t.Fatal("Expected error for missing nested required vars")
+		}
+
+		var multiErr *MultiError
+		if !errors.As(err, &multiErr) {
+			t.Fatalf("Expected MultiError, got %T", err)
+		}
+		if len(multiErr.Errors) != 2 {
+			t.Fatalf("Expected 2 flattened errors, got %d", len(multiErr.Errors))
+		}
+
+		for _, item := range multiErr.Errors {
+			var reqErr *RequiredError
+			if !errors.As(item, &reqErr) {
+				t.Fatalf("Expected flattened RequiredError, got %T", item)
+			}
+		}
+	})
+
+	t.Run("Slice Pointer Parse Error Keeps Cause", func(t *testing.T) {
+		type Config struct {
+			IDs []*int `env:"IDS"`
+		}
+
+		setEnv(t, "IDS", "1, nope, 3")
+
+		var cfg Config
+		err := Load(&cfg)
+		if err == nil {
+			t.Fatal("Expected parse error for invalid slice element")
+		}
+
+		var multiErr *MultiError
+		if !errors.As(err, &multiErr) || len(multiErr.Errors) == 0 {
+			t.Fatalf("Expected MultiError with errors, got %v", err)
+		}
+
+		var parseErr *ParseError
 		if !errors.As(multiErr.Errors[0], &parseErr) {
-			t.Errorf("Expected ParseError, got %T", multiErr.Errors[0])
+			t.Fatalf("Expected ParseError, got %T", multiErr.Errors[0])
+		}
+		if !strings.Contains(parseErr.Error(), "cannot parse") {
+			t.Fatalf("Expected parse-oriented message, got %q", parseErr.Error())
+		}
+		if strings.Contains(parseErr.Error(), "no parser registered") {
+			t.Fatalf("Expected real parse cause, got %q", parseErr.Error())
 		}
 	})
 }

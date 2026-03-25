@@ -201,8 +201,13 @@ Pointer fields are supported during struct loading. For scalar pointer fields su
 KEY=value
 MESSAGE="Hello World"
 DEBUG=true # inline comment
+export PORT=8080
 
-# Variable expansion
+# Multiline quoted values
+CERT="line1
+line2"
+
+# Variable expansion (uses the current environment and variables loaded earlier in the file)
 BASE=/app
 CONFIG=${BASE}/config
 ```

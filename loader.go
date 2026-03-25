@@ -2,10 +2,9 @@ package dotenvgo
 
 import (
 	"encoding"
+	"errors"
 	"fmt"
-	"os"
 	"reflect"
-	"strings"
 )
 
 // Load populates a struct from environment variables using struct tags.
@@ -70,7 +69,7 @@ func MustLoadWithPrefix(cfg any, prefix string) {
 
 func (l *Loader) loadStruct(v reflect.Value, prefix string) (bool, error) {
 	t := v.Type()
-	var errors []error
+	var errs []error
 	loadedAny := false
 
 	for i := 0; i < t.NumField(); i++ {
@@ -78,7 +77,7 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) (bool, error) {
 		fieldValue := v.Field(i)
 		envKey := field.Tag.Get("env")
 
-		// Skip unexported fields
+		// Skip unexported fields.
 		if !fieldValue.CanSet() {
 			continue
 		}
@@ -93,7 +92,7 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) (bool, error) {
 				nestedValue := reflect.New(nestedType).Elem()
 				nestedLoaded, err := l.loadStruct(nestedValue, nestedPrefix)
 				if err != nil {
-					errors = append(errors, err)
+					errs = appendError(errs, err)
 				}
 				if nestedLoaded {
 					target := reflect.New(nestedType)
@@ -106,7 +105,7 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) (bool, error) {
 
 			nestedLoaded, err := l.loadStruct(fieldValue, nestedPrefix)
 			if err != nil {
-				errors = append(errors, err)
+				errs = appendError(errs, err)
 			}
 			if nestedLoaded {
 				loadedAny = true
@@ -114,9 +113,7 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) (bool, error) {
 			continue
 		}
 
-		// Handle structs (embedded or named) that don't have a parser/unmarshaler
 		if field.Type.Kind() == reflect.Struct {
-			// Check if it's a "leaf" type (has parser or implements TextUnmarshaler)
 			_, hasParser := l.getParser(field.Type)
 			isUnmarshaler := field.Type.Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) ||
 				reflect.PointerTo(field.Type).Implements(reflect.TypeFor[encoding.TextUnmarshaler]())
@@ -126,42 +123,32 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) (bool, error) {
 			}
 		}
 
-		// Get struct tags
 		if envKey == "" {
 			continue
 		}
 
 		defaultValue := field.Tag.Get("default")
 		required := field.Tag.Get("required") == "true"
-
-		// Build full key with prefix
 		fullKey := joinEnvKey(prefix, envKey)
 
-		// Get value from environment
-		rawValue, exists := os.LookupEnv(fullKey)
-		value := os.ExpandEnv(rawValue)
-		if !exists {
-			if required {
-				errors = append(errors, &RequiredError{Key: fullKey})
-				continue
-			}
-			value = os.ExpandEnv(defaultValue)
+		value, exists, err := resolveFieldValue(fullKey, defaultValue, required)
+		if err != nil {
+			errs = appendError(errs, err)
+			continue
 		}
-
-		if !exists && value == "" {
+		if !exists {
 			continue
 		}
 
-		// Parse and set value
 		if err := l.setField(fieldValue, field.Tag, value); err != nil {
-			errors = append(errors, &ParseError{Key: fullKey, Value: value, Err: err})
+			errs = append(errs, &ParseError{Key: fullKey, Value: value, Err: err})
 			continue
 		}
 		loadedAny = true
 	}
 
-	if len(errors) > 0 {
-		return loadedAny, &MultiError{Errors: errors}
+	if len(errs) > 0 {
+		return loadedAny, &MultiError{Errors: errs}
 	}
 	return loadedAny, nil
 }
@@ -171,6 +158,19 @@ func joinEnvKey(prefix, key string) string {
 		return key
 	}
 	return prefix + "_" + key
+}
+
+func appendError(existing []error, err error) []error {
+	if err == nil {
+		return existing
+	}
+
+	var multiErr *MultiError
+	if errors.As(err, &multiErr) {
+		return append(existing, multiErr.Errors...)
+	}
+
+	return append(existing, err)
 }
 
 func (l *Loader) nestedStructType(t reflect.Type) (reflect.Type, bool) {
@@ -232,7 +232,6 @@ func (l *Loader) setField(field reflect.Value, tag reflect.StructTag, value stri
 		return nil
 	}
 
-	// 0. Handle custom separator for slices
 	if field.Kind() == reflect.Slice {
 		sep := tag.Get("sep")
 		if sep != "" || field.Type().Elem().Kind() == reflect.Pointer {
@@ -248,7 +247,6 @@ func (l *Loader) setField(field reflect.Value, tag reflect.StructTag, value stri
 		}
 	}
 
-	// 1. Check if type has a registered parser
 	if parser, ok := l.getParser(field.Type()); ok {
 		parsed, err := parser(value)
 		if err != nil {
@@ -258,14 +256,11 @@ func (l *Loader) setField(field reflect.Value, tag reflect.StructTag, value stri
 		return nil
 	}
 
-	// 2. Check if field implements encoding.TextUnmarshaler
 	if field.CanAddr() {
-		// Try pointer receiver
 		if u, ok := field.Addr().Interface().(encoding.TextUnmarshaler); ok {
 			return u.UnmarshalText([]byte(value))
 		}
 	} else if u, ok := field.Interface().(encoding.TextUnmarshaler); ok {
-		// Try value receiver (less common for mutation but possible)
 		return u.UnmarshalText([]byte(value))
 	}
 
@@ -273,22 +268,12 @@ func (l *Loader) setField(field reflect.Value, tag reflect.StructTag, value stri
 }
 
 func (l *Loader) parseSlice(sliceType reflect.Type, tag reflect.StructTag, value, sep string) (reflect.Value, error) {
-	parts := strings.Split(value, sep)
-	slice := reflect.MakeSlice(sliceType, 0, len(parts))
 	elemType := sliceType.Elem()
-
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-
+	return parseSliceValue(sliceType, value, sep, func(part string) (reflect.Value, error) {
 		elem := reflect.New(elemType).Elem()
 		if err := l.setField(elem, tag, part); err != nil {
-			return reflect.Value{}, fmt.Errorf("dotenvgo: no parser registered for slice element type %v: %w", elemType, err)
+			return reflect.Value{}, err
 		}
-		slice = reflect.Append(slice, elem)
-	}
-
-	return slice, nil
+		return elem, nil
+	})
 }

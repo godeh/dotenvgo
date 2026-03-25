@@ -179,21 +179,15 @@ func (l *Loader) getParser(t reflect.Type) (func(string) (any, error), bool) {
 		if elemParser, ok := l.registry[elemType]; ok {
 			// Generate slice parser dynamically
 			sliceParser := func(s string) (any, error) {
-				if s == "" {
-					return reflect.MakeSlice(t, 0, 0).Interface(), nil
-				}
-				parts := strings.Split(s, ",")
-				slice := reflect.MakeSlice(t, 0, len(parts))
-				for _, p := range parts {
-					trimmed := strings.TrimSpace(p)
-					if trimmed == "" {
-						continue
-					}
-					val, err := elemParser(trimmed)
+				slice, err := parseSliceValue(t, s, ",", func(part string) (reflect.Value, error) {
+					val, err := elemParser(part)
 					if err != nil {
-						return nil, err
+						return reflect.Value{}, err
 					}
-					slice = reflect.Append(slice, reflect.ValueOf(val))
+					return reflect.ValueOf(val), nil
+				})
+				if err != nil {
+					return nil, err
 				}
 				return slice.Interface(), nil
 			}
