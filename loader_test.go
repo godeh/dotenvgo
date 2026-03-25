@@ -13,13 +13,15 @@ type TestConfig struct {
 	Debug    bool          `env:"DEBUG" default:"false"`
 	Timeout  time.Duration `env:"TIMEOUT" default:"30s"`
 	Required string        `env:"REQUIRED_VAR" required:"true"`
+	Alias    string        `env:"ALIAS" default:"fallback"`
 
 	// Slices
 	Hosts []string `env:"ALLOWED_HOSTS"`
 	IDs   []int    `env:"ALLOWED_IDS" sep:";"`
 
 	// Pointers
-	Optional *int `env:"OPTIONAL_INT"`
+	Optional   *int    `env:"OPTIONAL_INT"`
+	OptionalDSN *string `env:"OPTIONAL_DSN"`
 
 	// Unexported should be ignored
 	secret string `env:"SECRET"`
@@ -48,13 +50,22 @@ func TestLoad(t *testing.T) {
 		if cfg.Debug != false {
 			t.Errorf("Expected Debug false, got %v", cfg.Debug)
 		}
-		if cfg.Timeout != 30*time.Second {
-			t.Errorf("Expected Timeout 30s, got %v", cfg.Timeout)
-		}
-		if cfg.secret != "" {
-			t.Errorf("Expected unexported field to remain unset, got %q", cfg.secret)
-		}
-	})
+			if cfg.Timeout != 30*time.Second {
+				t.Errorf("Expected Timeout 30s, got %v", cfg.Timeout)
+			}
+			if cfg.Alias != "fallback" {
+				t.Errorf("Expected Alias 'fallback', got %q", cfg.Alias)
+			}
+			if cfg.Optional != nil {
+				t.Errorf("Expected Optional to be nil, got %v", *cfg.Optional)
+			}
+			if cfg.OptionalDSN != nil {
+				t.Errorf("Expected OptionalDSN to be nil, got %q", *cfg.OptionalDSN)
+			}
+			if cfg.secret != "" {
+				t.Errorf("Expected unexported field to remain unset, got %q", cfg.secret)
+			}
+		})
 
 	t.Run("Env Overrides", func(t *testing.T) {
 		setEnv(t, "HOST", "127.0.0.1")
@@ -77,8 +88,46 @@ func TestLoad(t *testing.T) {
 		if cfg.Debug != true {
 			t.Errorf("Expected Debug true, got %v", cfg.Debug)
 		}
-		if cfg.Timeout != 1*time.Minute {
-			t.Errorf("Expected Timeout 1m, got %v", cfg.Timeout)
+			if cfg.Timeout != 1*time.Minute {
+				t.Errorf("Expected Timeout 1m, got %v", cfg.Timeout)
+			}
+		})
+
+	t.Run("Empty Strings Are Loaded", func(t *testing.T) {
+		setEnv(t, "ALIAS", "")
+		setEnv(t, "OPTIONAL_DSN", "")
+
+		var cfg TestConfig
+		err := Load(&cfg)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if cfg.Alias != "" {
+			t.Errorf("Expected Alias to be empty string, got %q", cfg.Alias)
+		}
+		if cfg.OptionalDSN == nil {
+			t.Fatal("Expected OptionalDSN to be set")
+		}
+		if *cfg.OptionalDSN != "" {
+			t.Errorf("Expected OptionalDSN to be empty string, got %q", *cfg.OptionalDSN)
+		}
+	})
+
+	t.Run("Pointer Fields", func(t *testing.T) {
+		setEnv(t, "OPTIONAL_INT", "42")
+
+		var cfg TestConfig
+		err := Load(&cfg)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if cfg.Optional == nil {
+			t.Fatal("Expected Optional to be set")
+		}
+		if *cfg.Optional != 42 {
+			t.Errorf("Expected Optional 42, got %d", *cfg.Optional)
 		}
 	})
 
@@ -99,6 +148,51 @@ func TestLoad(t *testing.T) {
 			t.Errorf("Expected [1, 2, 3], got %v", cfg.IDs)
 		}
 	})
+}
+
+func TestPointerDefaults(t *testing.T) {
+	type PointerConfig struct {
+		OptionalPort *int           `env:"OPTIONAL_PORT" default:"5432"`
+		OptionalTTL  *time.Duration `env:"OPTIONAL_TTL" default:"15s"`
+	}
+
+	var cfg PointerConfig
+	if err := Load(&cfg); err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.OptionalPort == nil {
+		t.Fatal("Expected OptionalPort to be set from default")
+	}
+	if *cfg.OptionalPort != 5432 {
+		t.Errorf("Expected OptionalPort 5432, got %d", *cfg.OptionalPort)
+	}
+	if cfg.OptionalTTL == nil {
+		t.Fatal("Expected OptionalTTL to be set from default")
+	}
+	if *cfg.OptionalTTL != 15*time.Second {
+		t.Errorf("Expected OptionalTTL 15s, got %v", *cfg.OptionalTTL)
+	}
+}
+
+func TestPointerLeafTypes(t *testing.T) {
+	type PointerConfig struct {
+		Location *time.Location `env:"LOCATION"`
+	}
+
+	setEnv(t, "LOCATION", "UTC")
+
+	var cfg PointerConfig
+	if err := Load(&cfg); err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Location == nil {
+		t.Fatal("Expected Location to be set")
+	}
+	if cfg.Location.String() != "UTC" {
+		t.Errorf("Expected Location UTC, got %q", cfg.Location.String())
+	}
 }
 
 func TestLoadWithPrefix(t *testing.T) {
@@ -137,15 +231,28 @@ func TestLoadErrors(t *testing.T) {
 
 	t.Run("Missing Required", func(t *testing.T) {
 		os.Unsetenv("REQUIRED_VAR")
-		var cfg TestConfig
-		err := Load(&cfg)
-		if err == nil {
-			t.Error("Expected error for missing required var")
-		}
+			var cfg TestConfig
+			err := Load(&cfg)
+			if err == nil {
+				t.Error("Expected error for missing required var")
+			}
 
 		var multiErr *MultiError
 		if !errors.As(err, &multiErr) {
 			t.Errorf("Expected MultiError, got %T", err)
+		}
+		})
+
+	t.Run("Required Empty String Does Not Error", func(t *testing.T) {
+		setEnv(t, "REQUIRED_VAR", "")
+
+		var cfg TestConfig
+		err := Load(&cfg)
+		if err != nil {
+			t.Fatalf("Expected empty required string to load, got %v", err)
+		}
+		if cfg.Required != "" {
+			t.Errorf("Expected Required to be empty string, got %q", cfg.Required)
 		}
 	})
 
@@ -202,25 +309,137 @@ func TestNestedStructs(t *testing.T) {
 		URL string `env:"URL" default:"localhost"`
 	}
 
-	type App struct {
+	type AppWithoutPrefix struct {
 		Name string `env:"NAME"`
 		DB   Database
 	}
 
-	setEnv(t, "NAME", "MyApp")
-	setEnv(t, "URL", "postgres://localhost:5432")
-
-	var app App
-	if err := Load(&app); err != nil {
-		t.Fatalf("Load failed: %v", err)
+	type AppWithPrefix struct {
+		Name string   `env:"NAME"`
+		DB   Database `env:"DB"`
 	}
 
-	if app.Name != "MyApp" {
-		t.Errorf("Expected Name 'MyApp', got %q", app.Name)
+	t.Run("Without Struct Prefix Tag", func(t *testing.T) {
+		setEnv(t, "NAME", "MyApp")
+		setEnv(t, "URL", "postgres://localhost:5432")
+
+		var app AppWithoutPrefix
+		if err := Load(&app); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if app.Name != "MyApp" {
+			t.Errorf("Expected Name 'MyApp', got %q", app.Name)
+		}
+		if app.DB.URL != "postgres://localhost:5432" {
+			t.Errorf("Expected DB.URL 'postgres://localhost:5432', got %q", app.DB.URL)
+		}
+	})
+
+	t.Run("With Struct Prefix Tag", func(t *testing.T) {
+		setEnv(t, "NAME", "MyApp")
+		setEnv(t, "DB_URL", "postgres://localhost:5432/prefixed")
+
+		var app AppWithPrefix
+		if err := Load(&app); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if app.Name != "MyApp" {
+			t.Errorf("Expected Name 'MyApp', got %q", app.Name)
+		}
+		if app.DB.URL != "postgres://localhost:5432/prefixed" {
+			t.Errorf("Expected DB.URL 'postgres://localhost:5432/prefixed', got %q", app.DB.URL)
+		}
+	})
+
+	t.Run("With Global Prefix And Struct Prefix Tag", func(t *testing.T) {
+		setEnv(t, "APP_NAME", "MyApp")
+		setEnv(t, "APP_DB_URL", "postgres://localhost:5432/global-prefixed")
+
+		var app AppWithPrefix
+		if err := LoadWithPrefix(&app, "APP"); err != nil {
+			t.Fatalf("LoadWithPrefix failed: %v", err)
+		}
+
+		if app.Name != "MyApp" {
+			t.Errorf("Expected Name 'MyApp', got %q", app.Name)
+		}
+		if app.DB.URL != "postgres://localhost:5432/global-prefixed" {
+			t.Errorf("Expected DB.URL 'postgres://localhost:5432/global-prefixed', got %q", app.DB.URL)
+		}
+	})
+}
+
+func TestNestedStructPointers(t *testing.T) {
+	type Database struct {
+		URL string `env:"URL" default:"localhost"`
 	}
-	if app.DB.URL != "postgres://localhost:5432" {
-		t.Errorf("Expected DB.URL 'postgres://localhost:5432', got %q", app.DB.URL)
+
+	type OptionalDatabase struct {
+		URL string `env:"URL"`
 	}
+
+	type Config struct {
+		DB *Database `env:"DB"`
+	}
+
+	t.Run("Nil When No Nested Values Or Defaults Exist", func(t *testing.T) {
+		type OptionalConfig struct {
+			DB *OptionalDatabase `env:"DB"`
+		}
+
+		var cfg OptionalConfig
+		if err := Load(&cfg); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if cfg.DB != nil {
+			t.Fatalf("Expected DB to remain nil, got %#v", cfg.DB)
+		}
+	})
+
+	t.Run("Allocates Pointer When Nested Default Exists", func(t *testing.T) {
+		var cfg Config
+		if err := Load(&cfg); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if cfg.DB == nil {
+			t.Fatal("Expected DB pointer to be allocated from nested default")
+		}
+		if cfg.DB.URL != "localhost" {
+			t.Errorf("Expected DB.URL 'localhost', got %q", cfg.DB.URL)
+		}
+	})
+
+	t.Run("Allocates Pointer When Nested Value Exists", func(t *testing.T) {
+		setEnv(t, "DB_URL", "postgres://localhost:5432/pointer")
+
+		var cfg Config
+		if err := Load(&cfg); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if cfg.DB == nil {
+			t.Fatal("Expected DB pointer to be allocated")
+		}
+		if cfg.DB.URL != "postgres://localhost:5432/pointer" {
+			t.Errorf("Expected DB.URL 'postgres://localhost:5432/pointer', got %q", cfg.DB.URL)
+		}
+	})
+
+	t.Run("Allocates Pointer With Global Prefix", func(t *testing.T) {
+		setEnv(t, "APP_DB_URL", "postgres://localhost:5432/pointer-prefixed")
+
+		var cfg Config
+		if err := LoadWithPrefix(&cfg, "APP"); err != nil {
+			t.Fatalf("LoadWithPrefix failed: %v", err)
+		}
+		if cfg.DB == nil {
+			t.Fatal("Expected DB pointer to be allocated")
+		}
+		if cfg.DB.URL != "postgres://localhost:5432/pointer-prefixed" {
+			t.Errorf("Expected DB.URL 'postgres://localhost:5432/pointer-prefixed', got %q", cfg.DB.URL)
+		}
+	})
 }
 
 // Custom type implementing TextUnmarshaler

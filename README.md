@@ -56,6 +56,22 @@ dotenvgo.Load(&cfg)
 
 // Or with prefix (APP_HOST, APP_PORT, etc.)
 dotenvgo.LoadWithPrefix(&cfg, "APP")
+
+type DatabaseConfig struct {
+    URL string `env:"URL"`
+}
+
+type AppConfig struct {
+    DB DatabaseConfig `env:"DB"`
+}
+
+var appCfg AppConfig
+
+// Reads DB_URL
+dotenvgo.Load(&appCfg)
+
+// Reads APP_DB_URL
+dotenvgo.LoadWithPrefix(&appCfg, "APP")
 ```
 
 ### Load `.env` Files
@@ -65,6 +81,33 @@ dotenvgo.LoadDotEnv(".env")        // Don't override existing vars
 dotenvgo.LoadDotEnv(".env", true)  // Override existing vars
 dotenvgo.MustLoadDotEnv(".env")    // Panic on error
 ```
+
+### Missing Vs Empty Values
+
+`dotenvgo` distinguishes between a variable that is missing and a variable that is explicitly set to an empty string.
+
+```go
+os.Unsetenv("DATABASE_URL")
+dbURL := dotenvgo.New[string]("DATABASE_URL").Default("postgres://localhost").Get()
+// dbURL == "postgres://localhost"
+
+os.Setenv("DATABASE_URL", "")
+dbURL = dotenvgo.New[string]("DATABASE_URL").Default("postgres://localhost").Get()
+// dbURL == ""
+
+type Config struct {
+    DSN *string `env:"DATABASE_URL"`
+}
+
+var cfg Config
+dotenvgo.Load(&cfg)
+// cfg.DSN points to ""
+```
+
+This also affects `required` and `.env` loading:
+
+- `required:"true"` only fails when the variable is missing.
+- `LoadDotEnv(path)` will not overwrite an existing variable, even if its value is empty.
 
 ### Custom Parsers
 
@@ -140,7 +183,7 @@ colorB := dotenvgo.WithLoader[Color](loaderB, "THEME").Get() // Red
 
 | Tag | Description | Example |
 |-----|-------------|---------|
-| `env` | Variable name | `env:"PORT"` |
+| `env` | Variable name, or nested struct prefix when used on a struct field | `env:"PORT"` / `env:"DB"` |
 | `default` | Default value | `default:"8080"` |
 | `required` | Fail if missing | `required:"true"` |
 | `sep` | Slice separator | `sep:";"` |
@@ -194,6 +237,8 @@ See [examples/](./examples) for complete working code:
 |---------|-------------|
 | [basic](./examples/basic) | Simple variable access |
 | [struct](./examples/struct) | Struct-based config |
+| [nested_prefix](./examples/nested_prefix) | Nested structs with env tag prefixes |
+| [empty_values](./examples/empty_values) | Missing vs empty value semantics |
 | [file](./examples/file) | Loading `.env` files |
 | [expansion](./examples/expansion) | Variable expansion |
 | [isolated_loader](./examples/isolated_loader) | Isolated loader demo |

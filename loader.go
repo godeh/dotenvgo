@@ -50,7 +50,8 @@ func (l *Loader) LoadWithPrefix(cfg any, prefix string) error {
 		return fmt.Errorf("dotenvgo: cfg must be a pointer to a struct")
 	}
 
-	return l.loadStruct(v, prefix)
+	_, err := l.loadStruct(v, prefix)
+	return err
 }
 
 // MustLoad is like Load but panics on error.
@@ -67,16 +68,49 @@ func MustLoadWithPrefix(cfg any, prefix string) {
 	}
 }
 
-func (l *Loader) loadStruct(v reflect.Value, prefix string) error {
+func (l *Loader) loadStruct(v reflect.Value, prefix string) (bool, error) {
 	t := v.Type()
 	var errors []error
+	loadedAny := false
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		fieldValue := v.Field(i)
+		envKey := field.Tag.Get("env")
 
 		// Skip unexported fields
 		if !fieldValue.CanSet() {
+			continue
+		}
+
+		if nestedType, ok := l.nestedStructType(field.Type); ok {
+			nestedPrefix := prefix
+			if envKey != "" {
+				nestedPrefix = joinEnvKey(prefix, envKey)
+			}
+
+			if fieldValue.Kind() == reflect.Pointer {
+				nestedValue := reflect.New(nestedType).Elem()
+				nestedLoaded, err := l.loadStruct(nestedValue, nestedPrefix)
+				if err != nil {
+					errors = append(errors, err)
+				}
+				if nestedLoaded {
+					target := reflect.New(nestedType)
+					target.Elem().Set(nestedValue)
+					fieldValue.Set(target)
+					loadedAny = true
+				}
+				continue
+			}
+
+			nestedLoaded, err := l.loadStruct(fieldValue, nestedPrefix)
+			if err != nil {
+				errors = append(errors, err)
+			}
+			if nestedLoaded {
+				loadedAny = true
+			}
 			continue
 		}
 
@@ -88,16 +122,11 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) error {
 				reflect.PointerTo(field.Type).Implements(reflect.TypeFor[encoding.TextUnmarshaler]())
 
 			if !hasParser && !isUnmarshaler {
-				// Recurse
-				if err := l.loadStruct(fieldValue, prefix); err != nil {
-					errors = append(errors, err)
-				}
 				continue
 			}
 		}
 
 		// Get struct tags
-		envKey := field.Tag.Get("env")
 		if envKey == "" {
 			continue
 		}
@@ -106,14 +135,12 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) error {
 		required := field.Tag.Get("required") == "true"
 
 		// Build full key with prefix
-		fullKey := envKey
-		if prefix != "" {
-			fullKey = prefix + "_" + envKey
-		}
+		fullKey := joinEnvKey(prefix, envKey)
 
 		// Get value from environment
-		value := os.ExpandEnv(os.Getenv(fullKey))
-		if value == "" {
+		rawValue, exists := os.LookupEnv(fullKey)
+		value := os.ExpandEnv(rawValue)
+		if !exists {
 			if required {
 				errors = append(errors, &RequiredError{Key: fullKey})
 				continue
@@ -121,23 +148,90 @@ func (l *Loader) loadStruct(v reflect.Value, prefix string) error {
 			value = os.ExpandEnv(defaultValue)
 		}
 
-		if value == "" {
+		if !exists && value == "" {
 			continue
 		}
 
 		// Parse and set value
 		if err := l.setField(fieldValue, field.Tag, value); err != nil {
 			errors = append(errors, &ParseError{Key: fullKey, Value: value, Err: err})
+			continue
 		}
+		loadedAny = true
 	}
 
 	if len(errors) > 0 {
-		return &MultiError{Errors: errors}
+		return loadedAny, &MultiError{Errors: errors}
 	}
-	return nil
+	return loadedAny, nil
+}
+
+func joinEnvKey(prefix, key string) string {
+	if prefix == "" {
+		return key
+	}
+	return prefix + "_" + key
+}
+
+func (l *Loader) nestedStructType(t reflect.Type) (reflect.Type, bool) {
+	baseType := t
+	if baseType.Kind() == reflect.Pointer {
+		baseType = baseType.Elem()
+	}
+
+	if baseType.Kind() != reflect.Struct {
+		return nil, false
+	}
+	if l.isLeafType(t) || l.isLeafType(baseType) {
+		return nil, false
+	}
+
+	return baseType, true
+}
+
+func (l *Loader) isLeafType(t reflect.Type) bool {
+	textUnmarshaler := reflect.TypeFor[encoding.TextUnmarshaler]()
+
+	if _, ok := l.getParser(t); ok {
+		return true
+	}
+	if t.Implements(textUnmarshaler) {
+		return true
+	}
+	if t.Kind() != reflect.Pointer && reflect.PointerTo(t).Implements(textUnmarshaler) {
+		return true
+	}
+
+	return false
 }
 
 func (l *Loader) setField(field reflect.Value, tag reflect.StructTag, value string) error {
+	if field.Kind() == reflect.Pointer {
+		if parser, ok := l.getParser(field.Type()); ok {
+			parsed, err := parser(value)
+			if err != nil {
+				return err
+			}
+			field.Set(reflect.ValueOf(parsed))
+			return nil
+		}
+
+		target := reflect.New(field.Type().Elem())
+		if u, ok := target.Interface().(encoding.TextUnmarshaler); ok {
+			if err := u.UnmarshalText([]byte(value)); err != nil {
+				return err
+			}
+			field.Set(target)
+			return nil
+		}
+
+		if err := l.setField(target.Elem(), tag, value); err != nil {
+			return err
+		}
+		field.Set(target)
+		return nil
+	}
+
 	// 0. Handle custom separator for slices
 	if field.Kind() == reflect.Slice {
 		sep := tag.Get("sep")

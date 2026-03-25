@@ -113,9 +113,9 @@ func (v *Var[T]) Get() T {
 func (v *Var[T]) GetE() (T, error) {
 	var zero T
 	key := v.fullKey()
-	raw := os.Getenv(key)
+	raw, exists := os.LookupEnv(key)
 
-	if raw == "" {
+	if !exists {
 		if v.required {
 			return zero, &RequiredError{Key: key}
 		}
@@ -139,7 +139,7 @@ func (v *Var[T]) Lookup() (T, bool) {
 	key := v.fullKey()
 	raw, exists := os.LookupEnv(key)
 
-	if !exists || raw == "" {
+	if !exists {
 		if v.defaultValue != nil {
 			return *v.defaultValue, true
 		}
@@ -182,14 +182,6 @@ func LoadDotEnv(path string, override ...bool) error {
 		shouldOverride = override[0]
 	}
 	return loadDotEnvInternal(path, shouldOverride)
-}
-
-// LoadDotEnvOverride loads environment variables from a .env file.
-// It DOES override existing environment variables.
-//
-// Deprecated: Use LoadDotEnv(path, true) instead.
-func LoadDotEnvOverride(path string) error {
-	return LoadDotEnv(path, true)
 }
 
 func loadDotEnvInternal(path string, override bool) error {
@@ -255,7 +247,12 @@ func loadDotEnvInternal(path string, override bool) error {
 		}
 
 		// Only set if not already set (unless override)
-		if override || os.Getenv(key) == "" {
+		if override {
+			_ = os.Setenv(key, value)
+			continue
+		}
+
+		if _, exists := os.LookupEnv(key); !exists {
 			_ = os.Setenv(key, value)
 		}
 	}

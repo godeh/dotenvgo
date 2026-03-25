@@ -25,11 +25,39 @@ func TestEnvVar(t *testing.T) {
 		}
 	})
 
+	t.Run("Empty String Is A Value", func(t *testing.T) {
+		_ = os.Setenv("EMPTY_VALUE", "")
+		defer func() { _ = os.Unsetenv("EMPTY_VALUE") }()
+
+		v := New[string]("EMPTY_VALUE").Default("default")
+		val, err := v.GetE()
+		if err != nil {
+			t.Fatalf("GetE failed: %v", err)
+		}
+		if val != "" {
+			t.Errorf("Expected empty string, got %q", val)
+		}
+	})
+
 	t.Run("Required Var", func(t *testing.T) {
 		v := New[string]("NON_EXISTENT").Required()
 		_, err := v.GetE()
 		if err == nil {
 			t.Error("Expected error for missing required var")
+		}
+	})
+
+	t.Run("Required Empty String Does Not Error", func(t *testing.T) {
+		_ = os.Setenv("REQUIRED_EMPTY", "")
+		defer func() { _ = os.Unsetenv("REQUIRED_EMPTY") }()
+
+		v := New[string]("REQUIRED_EMPTY").Required()
+		val, err := v.GetE()
+		if err != nil {
+			t.Fatalf("Expected empty string to satisfy required, got %v", err)
+		}
+		if val != "" {
+			t.Errorf("Expected empty string, got %q", val)
 		}
 	})
 
@@ -118,9 +146,9 @@ func TestVarUtilities(t *testing.T) {
 		}
 	})
 
-	t.Run("Lookup", func(t *testing.T) {
-		Set(key, "val")
-		defer Unset(key)
+		t.Run("Lookup", func(t *testing.T) {
+			Set(key, "val")
+			defer Unset(key)
 
 		v := New[string](key)
 		val, exists := v.Lookup()
@@ -135,15 +163,23 @@ func TestVarUtilities(t *testing.T) {
 			t.Errorf("Lookup default failed: %v, %v", val, exists)
 		}
 
-		// Missing
-		vMiss := New[string]("NON_EXISTENT_2")
-		_, exists = vMiss.Lookup()
-		if exists {
-			t.Error("Lookup expected false for missing var")
-		}
+			// Missing
+			vMiss := New[string]("NON_EXISTENT_2")
+			_, exists = vMiss.Lookup()
+			if exists {
+				t.Error("Lookup expected false for missing var")
+			}
 
-		// Parser Error
-		Set("INT_KEY", "invalid")
+			Set("EMPTY_LOOKUP", "")
+			defer Unset("EMPTY_LOOKUP")
+			vEmpty := New[string]("EMPTY_LOOKUP").Default("default")
+			val, exists = vEmpty.Lookup()
+			if !exists || val != "" {
+				t.Errorf("Lookup expected empty string value, got %q, %v", val, exists)
+			}
+
+			// Parser Error
+			Set("INT_KEY", "invalid")
 		defer Unset("INT_KEY")
 		vInt := New[int]("INT_KEY")
 		_, exists = vInt.Lookup()
@@ -210,12 +246,29 @@ func TestLoadDotEnvExtras(t *testing.T) {
 		Set("TEST_KEY", "old_value")
 		defer Unset("TEST_KEY")
 
-		if err := LoadDotEnvOverride(filename); err != nil {
-			t.Fatal(err)
-		}
+			if err := LoadDotEnv(filename, true); err != nil {
+				t.Fatal(err)
+			}
 
 		if val := os.Getenv("TEST_KEY"); val != "new_value" {
 			t.Errorf("Expected 'new_value', got %q", val)
+		}
+	})
+
+	t.Run("Empty Existing Value Is Not Overridden", func(t *testing.T) {
+		Set("TEST_KEY", "")
+		defer Unset("TEST_KEY")
+
+		if err := LoadDotEnv(filename); err != nil {
+			t.Fatal(err)
+		}
+
+		val, exists := os.LookupEnv("TEST_KEY")
+		if !exists {
+			t.Fatal("Expected TEST_KEY to remain set")
+		}
+		if val != "" {
+			t.Errorf("Expected empty value to remain unchanged, got %q", val)
 		}
 	})
 
@@ -292,7 +345,7 @@ UNCLOSED="unclosed
 	}
 	defer os.Remove(filename)
 
-	if err := LoadDotEnvOverride(filename); err != nil {
+	if err := LoadDotEnv(filename, true); err != nil {
 		t.Fatal(err)
 	}
 
