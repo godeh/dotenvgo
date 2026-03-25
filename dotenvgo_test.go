@@ -206,13 +206,13 @@ func TestLoadDotEnvExtras(t *testing.T) {
 	}
 	defer os.Remove(filename)
 
-	t.Run("Override", func(t *testing.T) {
-		Set("TEST_KEY", "old_value")
-		defer Unset("TEST_KEY")
+		t.Run("Override", func(t *testing.T) {
+			Set("TEST_KEY", "old_value")
+			defer Unset("TEST_KEY")
 
-		if err := LoadDotEnvOverride(filename); err != nil {
-			t.Fatal(err)
-		}
+			if err := LoadDotEnv(filename, true); err != nil {
+				t.Fatal(err)
+			}
 
 		if val := os.Getenv("TEST_KEY"); val != "new_value" {
 			t.Errorf("Expected 'new_value', got %q", val)
@@ -292,7 +292,7 @@ UNCLOSED="unclosed
 	}
 	defer os.Remove(filename)
 
-	if err := LoadDotEnvOverride(filename); err != nil {
+	if err := LoadDotEnv(filename, true); err != nil {
 		t.Fatal(err)
 	}
 

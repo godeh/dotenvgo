@@ -24,7 +24,7 @@ mixed_quotes='He said "Hello"'
 	defer os.Remove(".env.example")
 
 	// Load the .env file
-	if err := dotenvgo.LoadDotEnvOverride(".env.example"); err != nil {
+	if err := dotenvgo.LoadDotEnv(".env.example", true); err != nil {
 		panic(err)
 	}
 

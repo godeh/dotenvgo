@@ -184,14 +184,6 @@ func LoadDotEnv(path string, override ...bool) error {
 	return loadDotEnvInternal(path, shouldOverride)
 }
 
-// LoadDotEnvOverride loads environment variables from a .env file.
-// It DOES override existing environment variables.
-//
-// Deprecated: Use LoadDotEnv(path, true) instead.
-func LoadDotEnvOverride(path string) error {
-	return LoadDotEnv(path, true)
-}
-
 func loadDotEnvInternal(path string, override bool) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
