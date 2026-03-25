@@ -51,6 +51,9 @@ func TestLoad(t *testing.T) {
 		if cfg.Timeout != 30*time.Second {
 			t.Errorf("Expected Timeout 30s, got %v", cfg.Timeout)
 		}
+		if cfg.Optional != nil {
+			t.Errorf("Expected Optional to be nil, got %v", *cfg.Optional)
+		}
 		if cfg.secret != "" {
 			t.Errorf("Expected unexported field to remain unset, got %q", cfg.secret)
 		}
@@ -82,6 +85,23 @@ func TestLoad(t *testing.T) {
 		}
 	})
 
+	t.Run("Pointer Fields", func(t *testing.T) {
+		setEnv(t, "OPTIONAL_INT", "42")
+
+		var cfg TestConfig
+		err := Load(&cfg)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if cfg.Optional == nil {
+			t.Fatal("Expected Optional to be set")
+		}
+		if *cfg.Optional != 42 {
+			t.Errorf("Expected Optional 42, got %d", *cfg.Optional)
+		}
+	})
+
 	t.Run("Slices", func(t *testing.T) {
 		setEnv(t, "ALLOWED_HOSTS", "a,b, c ") // Default comma, trimming
 		setEnv(t, "ALLOWED_IDS", "1; 2;3")    // Custom semicolon
@@ -99,6 +119,31 @@ func TestLoad(t *testing.T) {
 			t.Errorf("Expected [1, 2, 3], got %v", cfg.IDs)
 		}
 	})
+}
+
+func TestPointerDefaults(t *testing.T) {
+	type PointerConfig struct {
+		OptionalPort *int           `env:"OPTIONAL_PORT" default:"5432"`
+		OptionalTTL  *time.Duration `env:"OPTIONAL_TTL" default:"15s"`
+	}
+
+	var cfg PointerConfig
+	if err := Load(&cfg); err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.OptionalPort == nil {
+		t.Fatal("Expected OptionalPort to be set from default")
+	}
+	if *cfg.OptionalPort != 5432 {
+		t.Errorf("Expected OptionalPort 5432, got %d", *cfg.OptionalPort)
+	}
+	if cfg.OptionalTTL == nil {
+		t.Fatal("Expected OptionalTTL to be set from default")
+	}
+	if *cfg.OptionalTTL != 15*time.Second {
+		t.Errorf("Expected OptionalTTL 15s, got %v", *cfg.OptionalTTL)
+	}
 }
 
 func TestLoadWithPrefix(t *testing.T) {

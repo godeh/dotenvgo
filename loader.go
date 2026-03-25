@@ -147,6 +147,15 @@ func joinEnvKey(prefix, key string) string {
 }
 
 func (l *Loader) setField(field reflect.Value, tag reflect.StructTag, value string) error {
+	if field.Kind() == reflect.Pointer {
+		target := reflect.New(field.Type().Elem())
+		if err := l.setField(target.Elem(), tag, value); err != nil {
+			return err
+		}
+		field.Set(target)
+		return nil
+	}
+
 	// 0. Handle custom separator for slices
 	if field.Kind() == reflect.Slice {
 		sep := tag.Get("sep")
