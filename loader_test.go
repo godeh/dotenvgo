@@ -195,6 +195,86 @@ func TestPointerLeafTypes(t *testing.T) {
 	}
 }
 
+func TestPointerSlices(t *testing.T) {
+	t.Run("Pointer To Slice", func(t *testing.T) {
+		type PointerSliceConfig struct {
+			Hosts *[]string `env:"HOSTS"`
+			Ports *[]int    `env:"PORTS" default:"8080,9090"`
+		}
+
+		setEnv(t, "HOSTS", "api,worker")
+
+		var cfg PointerSliceConfig
+		if err := Load(&cfg); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if cfg.Hosts == nil {
+			t.Fatal("Expected Hosts to be set")
+		}
+		if len(*cfg.Hosts) != 2 || (*cfg.Hosts)[0] != "api" || (*cfg.Hosts)[1] != "worker" {
+			t.Errorf("Expected Hosts [api worker], got %v", *cfg.Hosts)
+		}
+		if cfg.Ports == nil {
+			t.Fatal("Expected Ports default to be set")
+		}
+		if len(*cfg.Ports) != 2 || (*cfg.Ports)[0] != 8080 || (*cfg.Ports)[1] != 9090 {
+			t.Errorf("Expected Ports [8080 9090], got %v", *cfg.Ports)
+		}
+	})
+
+	t.Run("Slice Of Pointers", func(t *testing.T) {
+		type SlicePointerConfig struct {
+			Hosts []*string `env:"HOSTS"`
+			IDs   []*int    `env:"IDS" sep:";"`
+		}
+
+		setEnv(t, "HOSTS", "api,worker")
+		setEnv(t, "IDS", "1; 2;3")
+
+		var cfg SlicePointerConfig
+		if err := Load(&cfg); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if len(cfg.Hosts) != 2 {
+			t.Fatalf("Expected 2 Hosts, got %d", len(cfg.Hosts))
+		}
+		if cfg.Hosts[0] == nil || cfg.Hosts[1] == nil {
+			t.Fatal("Expected all Host pointers to be non-nil")
+		}
+		if *cfg.Hosts[0] != "api" || *cfg.Hosts[1] != "worker" {
+			t.Errorf("Expected Hosts [api worker], got [%q %q]", *cfg.Hosts[0], *cfg.Hosts[1])
+		}
+
+		if len(cfg.IDs) != 3 {
+			t.Fatalf("Expected 3 IDs, got %d", len(cfg.IDs))
+		}
+		for i, expected := range []int{1, 2, 3} {
+			if cfg.IDs[i] == nil {
+				t.Fatalf("Expected ID pointer at index %d to be non-nil", i)
+			}
+			if *cfg.IDs[i] != expected {
+				t.Errorf("Expected ID %d at index %d, got %d", expected, i, *cfg.IDs[i])
+			}
+		}
+	})
+
+	t.Run("Pointer To Slice Remains Nil When Missing", func(t *testing.T) {
+		type PointerSliceConfig struct {
+			Hosts *[]string `env:"HOSTS"`
+		}
+
+		var cfg PointerSliceConfig
+		if err := Load(&cfg); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if cfg.Hosts != nil {
+			t.Errorf("Expected Hosts to remain nil, got %v", *cfg.Hosts)
+		}
+	})
+}
+
 func TestLoadWithPrefix(t *testing.T) {
 	setEnv(t, "APP_REQUIRED_VAR", "req")
 	setEnv(t, "APP_HOST", "app-host")
