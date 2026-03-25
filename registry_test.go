@@ -1,6 +1,7 @@
 package dotenvgo
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -259,4 +260,87 @@ func TestLoaderIsolation(t *testing.T) {
 	if err == nil {
 		t.Error("DefaultLoader should NOT have a parser for ValidationStatus")
 	}
+}
+
+type fakeError struct {
+	message string
+}
+
+func (e *fakeError) Error() string {
+	return e.message
+}
+
+func TestRegisterParserValidation(t *testing.T) {
+	t.Run("accepts custom error type", func(t *testing.T) {
+		loader := NewLoader()
+		type parserType int
+
+		loader.RegisterParser(func(s string) (parserType, *fakeError) {
+			return parserType(len(s)), nil
+		})
+
+		parser, ok := loader.getParser(reflect.TypeFor[parserType]())
+		if !ok {
+			t.Fatal("expected parser to be registered")
+		}
+
+		value, err := parser("abc")
+		if err != nil {
+			t.Fatalf("expected parser to succeed: %v", err)
+		}
+		if value.(parserType) != 3 {
+			t.Fatalf("expected parsed value 3, got %v", value)
+		}
+	})
+
+	t.Run("rejects non error second return", func(t *testing.T) {
+		loader := NewLoader()
+		assertPanicsWithMessage(t, "parser must return (T, error)", func() {
+			loader.RegisterParser(func(s string) (int, fmt.Stringer) {
+				return 0, nil
+			})
+		})
+	})
+
+	t.Run("rejects wrong signatures", func(t *testing.T) {
+		loader := NewLoader()
+
+		assertPanicsWithMessage(t, "parser must be a function", func() {
+			loader.RegisterParser(123)
+		})
+
+		assertPanicsWithMessage(t, "parser must take a single string argument", func() {
+			loader.RegisterParser(func(int) (string, error) {
+				return "", nil
+			})
+		})
+
+		assertPanicsWithMessage(t, "parser must return (T, error)", func() {
+			loader.RegisterParser(func(string) string {
+				return ""
+			})
+		})
+	})
+}
+
+func assertPanicsWithMessage(t *testing.T, message string, fn func()) {
+	t.Helper()
+
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatalf("expected panic %q", message)
+		}
+
+		panicMessage, ok := recovered.(string)
+		if !ok {
+			t.Fatalf("expected panic string %q, got %T", message, recovered)
+		}
+
+		if panicMessage != message {
+			t.Fatalf("expected panic %q, got %q", message, panicMessage)
+		}
+	}()
+
+	fn()
 }

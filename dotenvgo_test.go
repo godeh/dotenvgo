@@ -2,6 +2,7 @@ package dotenvgo
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -91,6 +92,48 @@ func TestLoadDotEnv(t *testing.T) {
 	}
 	if val := os.Getenv("QUOTED"); val != "value with spaces" {
 		t.Errorf("Expected 'value with spaces', got %q", val)
+	}
+}
+
+func TestLoadDotEnvParsingFeatures(t *testing.T) {
+	filename := ".env.features"
+	content := []byte(strings.Join([]string{
+		"export EXPORTED=from_export",
+		"BASE_URL=https://example.com",
+		`API_URL="${BASE_URL}/api"`,
+		`ESCAPED="tab:\t newline:\n quote:\" slash:\\"`,
+		`SINGLE_QUOTED='single quoted value'`,
+		"MULTILINE=\"line1",
+		"line2\"",
+	}, "\n"))
+	if err := os.WriteFile(filename, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(filename) }()
+	defer Unset("EXPORTED")
+	defer Unset("BASE_URL")
+	defer Unset("API_URL")
+	defer Unset("ESCAPED")
+	defer Unset("SINGLE_QUOTED")
+	defer Unset("MULTILINE")
+
+	if err := LoadDotEnv(filename, true); err != nil {
+		t.Fatalf("LoadDotEnv failed: %v", err)
+	}
+
+	checks := map[string]string{
+		"EXPORTED":      "from_export",
+		"BASE_URL":      "https://example.com",
+		"API_URL":       "https://example.com/api",
+		"ESCAPED":       "tab:\t newline:\n quote:\" slash:\\",
+		"SINGLE_QUOTED": "single quoted value",
+		"MULTILINE":     "line1\nline2",
+	}
+
+	for key, expected := range checks {
+		if got := os.Getenv(key); got != expected {
+			t.Errorf("Key %s: expected %q, got %q", key, expected, got)
+		}
 	}
 }
 
@@ -355,7 +398,7 @@ UNCLOSED="unclosed
 		"SINGLE_QUOTED": "single quoted",
 		"WITH_HASH":     "val#ue",
 		"WITH_COMMENT":  "value",
-		"UNCLOSED":      "\"unclosed", // Implementation dependent, usually raw
+		"UNCLOSED":      "unclosed\n\t",
 	}
 
 	for k, expected := range checks {

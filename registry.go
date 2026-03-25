@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var errorType = reflect.TypeFor[error]()
+
 // Loader manages the configuration loading and parser registry.
 type Loader struct {
 	mu       sync.RWMutex
@@ -130,7 +132,7 @@ func (l *Loader) RegisterParser(parser any) {
 	if t.NumIn() != 1 || t.In(0).Kind() != reflect.String {
 		panic("parser must take a single string argument")
 	}
-	if t.NumOut() != 2 || t.Out(1).Name() != "error" {
+	if t.NumOut() != 2 || !t.Out(1).Implements(errorType) {
 		panic("parser must return (T, error)")
 	}
 
@@ -141,7 +143,15 @@ func (l *Loader) RegisterParser(parser any) {
 
 	l.registry[targetType] = func(s string) (any, error) {
 		res := v.Call([]reflect.Value{reflect.ValueOf(s)})
-		errVal := res[1].Interface()
+		errResult := res[1]
+		switch errResult.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if errResult.IsNil() {
+				return res[0].Interface(), nil
+			}
+		}
+
+		errVal := errResult.Interface()
 		if errVal != nil {
 			return nil, errVal.(error)
 		}
@@ -179,21 +189,15 @@ func (l *Loader) getParser(t reflect.Type) (func(string) (any, error), bool) {
 		if elemParser, ok := l.registry[elemType]; ok {
 			// Generate slice parser dynamically
 			sliceParser := func(s string) (any, error) {
-				if s == "" {
-					return reflect.MakeSlice(t, 0, 0).Interface(), nil
-				}
-				parts := strings.Split(s, ",")
-				slice := reflect.MakeSlice(t, 0, len(parts))
-				for _, p := range parts {
-					trimmed := strings.TrimSpace(p)
-					if trimmed == "" {
-						continue
-					}
-					val, err := elemParser(trimmed)
+				slice, err := parseSliceValue(t, s, ",", func(part string) (reflect.Value, error) {
+					val, err := elemParser(part)
 					if err != nil {
-						return nil, err
+						return reflect.Value{}, err
 					}
-					slice = reflect.Append(slice, reflect.ValueOf(val))
+					return reflect.ValueOf(val), nil
+				})
+				if err != nil {
+					return nil, err
 				}
 				return slice.Interface(), nil
 			}
