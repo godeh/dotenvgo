@@ -1,6 +1,6 @@
 # dotenvgo
 
-[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat-square&logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-green?style=flat-square)](go.mod)
 [![Coverage](https://img.shields.io/badge/Coverage-91%25-brightgreen?style=flat-square)](https://github.com/godeh/dotenvgo)
@@ -12,6 +12,8 @@
 ```bash
 go get github.com/godeh/dotenvgo
 ```
+
+Requires Go 1.22 or newer.
 
 ## Quick Examples
 

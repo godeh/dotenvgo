@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var errorType = reflect.TypeFor[error]()
+
 // Loader manages the configuration loading and parser registry.
 type Loader struct {
 	mu       sync.RWMutex
@@ -130,7 +132,7 @@ func (l *Loader) RegisterParser(parser any) {
 	if t.NumIn() != 1 || t.In(0).Kind() != reflect.String {
 		panic("parser must take a single string argument")
 	}
-	if t.NumOut() != 2 || t.Out(1).Name() != "error" {
+	if t.NumOut() != 2 || !t.Out(1).Implements(errorType) {
 		panic("parser must return (T, error)")
 	}
 
@@ -141,7 +143,15 @@ func (l *Loader) RegisterParser(parser any) {
 
 	l.registry[targetType] = func(s string) (any, error) {
 		res := v.Call([]reflect.Value{reflect.ValueOf(s)})
-		errVal := res[1].Interface()
+		errResult := res[1]
+		switch errResult.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if errResult.IsNil() {
+				return res[0].Interface(), nil
+			}
+		}
+
+		errVal := errResult.Interface()
 		if errVal != nil {
 			return nil, errVal.(error)
 		}
